@@ -91,7 +91,6 @@ t_token_dict tl_dict[] = {
 	{ T_REGISTERS, "registers" },
 	{ T_SCAN, "scan" },
 	{ T_SNIFF, "sniff" },
-	{ T_SNIFF_DBG, "sniff-dbg" },
 	{ T_GPIO, "gpio" },
 	{ T_IN, "in" },
 	{ T_OUT, "out" },
@@ -202,10 +201,6 @@ t_token tokens_mode_nfc_scan[] = {
 	{\
 		T_SNIFF,\
 		.help = "Sniff (ISO14443A only)"\
-	},\
-	{\
-		T_SNIFF_DBG,\
-		.help = "Sniff debug (ISO14443A only)"\
 	},\
 	{\
 		T_EMUL_MIFARE,\

@@ -36,6 +36,7 @@ uint8_t buf[512] __attribute__ ((section(".ccm")));
 uint8_t fbuff[2048] __attribute__ ((section(".ccm")));
 
 uint32_t g_sbuf_idx;
+
 uint8_t g_sbuf[NB_SBUFFER+128] __attribute__ ((aligned (4)));
 
 extern uint32_t debug_flags;

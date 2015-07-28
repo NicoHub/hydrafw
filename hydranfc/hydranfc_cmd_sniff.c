@@ -2,6 +2,7 @@
  * HydraBus/HydraNFC
  *
  * Copyright (C) 2012-2014 Benjamin VERNOUX
+ * Copyright (C) 2015 Nicolas CHAUVEAU
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +16,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#include "file_fmt_pcap.h"
+#include "file_fmt.h"
 
 #include <stdarg.h>
 #include <stdio.h> /* sprintf */
@@ -46,6 +50,7 @@ uint8_t irq_no;
 volatile int irq_sampling = 0;
 
 static uint32_t old_u32_data, u32_data, old_data_bit;
+
 
 /*
 * SPI1 configuration structure.
@@ -250,59 +255,6 @@ __attribute__ ((always_inline)) static inline uint32_t WaitGetDMABuffer(void)
 	return 0;
 }
 
-/* Return 0 if OK else < 0 error code */
-int sniff_write_file(uint8_t* buffer, uint32_t size)
-{
-	uint32_t i;
-	FRESULT err;
-	FIL FileObject;
-	uint32_t bytes_written;
-
-	if (size == 0) {
-		return -1;
-	}
-
-	if (is_fs_ready()==FALSE) {
-		if (mount() != 0) {
-			return -5;
-		}
-	} else {
-		umount();
-		if (mount() != 0) {
-			return -5;
-		}
-	}
-
-	/* Save data in file */
-	for(i=0; i<999; i++) {
-		sprintf(write_filename.filename, "0:nfc_sniff_%ld.txt", i);
-		err = f_open(&FileObject, write_filename.filename, FA_WRITE | FA_CREATE_NEW);
-		if (err == FR_OK) {
-			break;
-		}
-	}
-	if (err == FR_OK) {
-		err = f_write(&FileObject, buffer, size, (void *)&bytes_written);
-		if (err != FR_OK) {
-			f_close(&FileObject);
-			umount();
-			return -3;
-		}
-
-		err = f_close(&FileObject);
-		if (err != FR_OK) {
-			umount();
-			return -4;
-		}
-	} else {
-		umount();
-		return -2;
-	}
-
-	umount();
-	return 0;
-}
-
 /*
   Write sniffed data in file and display those data on Terminal if connected.
   In case of Write Error(No SDCard, Write error or no data) D5 LED blink quickly
@@ -315,11 +267,21 @@ void sniff_log(void)
 	terminate_sniff_nfc();
 	D4_OFF;
 	D5_OFF;
+	FIL file;
 
-	if ( sniff_write_file(sniffer_get_buffer(), sniffer_get_size()) < 0 ) {
-		/* Display sniffed data */
+	///qwerty
+    const file_fmt_exec_t *file_fmt_exec = &file_fmt_pcap_exec;
+
+    file = file_fmt_exec->file_fmt_create();
+
+   if ( file_fmt_flush_close(file ,sniffer_get_buffer(), sniffer_get_size()) < 0 ) {
+
 		tprintf("Sniffed data:\r\n");
+
+		///qwerty
 		tprint_str( (char*)sniffer_get_buffer(), sniffer_get_size() );
+
+
 		tprintf("\r\n");
 		tprintf("\r\n");
 
@@ -329,7 +291,7 @@ void sniff_log(void)
 		tprintf("write_file() error\r\n", write_filename);
 		tprintf("\r\n");
 
-		/* Error Red LED blink */
+		// Error Red LED blink
 		for(i=0; i<4; i++) {
 			D5_ON;
 			DelayUs(50000);
@@ -337,15 +299,20 @@ void sniff_log(void)
 			DelayUs(50000);
 		}
 	} else {
-		/* Display sniffed data */
+		// Display sniffed data //
 		tprintf("Sniffed data:\r\n");
+
+
+		///qwerty
 		tprint_str( (char*)sniffer_get_buffer(), sniffer_get_size() );
 		tprintf("\r\n");
-
-		write_file_get_last_filename(&write_filename);
 		tprintf("write_file %s buffer=0x%08LX size=%ld bytes\r\n",
 			&write_filename.filename[2], sniffer_get_buffer(), sniffer_get_size());
 		tprintf("write_file() OK\r\n");
+
+
+		///qwerty
+        file_fmt_flush_close(file ,sniffer_get_buffer(), sniffer_get_size());
 
 		/* All is OK Green LED bink */
 		for(i=0; i<4; i++) {
@@ -381,183 +348,6 @@ bool sniff_wait_data_change_or_exit(void)
 	return FALSE;
 }
 
-__attribute__ ((always_inline)) static inline
-void sniff_write_pcd(void)
-{
-	/* Write output buffer 4 space (data format Miller Modified):
-	  It means Reader/Writer (PCD – Proximity Coupling Device)
-	*/
-	uint32_t i, nb_cycles;
-	uint8_t val;
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
-
-	nb_cycles = get_cyclecounter();
-	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
-	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
-
-	g_sbuf[i+11] = 'R';
-	g_sbuf[i+12] = 'D';
-	g_sbuf[i+13] = 'R';
-	g_sbuf[i+14] = '\t';
-	g_sbuf_idx +=15;
-}
-
-__attribute__ ((always_inline)) static inline
-void sniff_write_picc(void)
-{
-	/* Write output buffer "TAG"+1 space (data format Manchester):
-	  It means TAG(PICC – Proximity Integrated Circuit Card)
-	*/
-	uint32_t i, nb_cycles;
-	uint8_t val;
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
-
-	nb_cycles = get_cyclecounter();
-	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
-	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
-
-	g_sbuf[i+11] = 'T';
-	g_sbuf[i+12] = 'A';
-	g_sbuf[i+13] = 'G';
-	g_sbuf[i+14] = '\t';
-	g_sbuf_idx +=15;
-}
-
-__attribute__ ((always_inline)) static inline
-void sniff_write_unknown_protocol(uint8_t data)
-{
-	/* Unknown Protocol */
-	/* TODO: Detect other coding */
-	// In Freq of 3.39MHz => 105.9375KHz on 8bits (each bit is 848KHz so 2bits=423.75KHz)
-	/*
-	  data  = (downsample_4x[(f_data>>24)])<<6;
-	  data |= (downsample_4x[((f_data&0x00FF0000)>>16)])<<4;
-	  data |= (downsample_4x[((f_data&0x0000FF00)>>8)])<<2;
-	  data |= (downsample_4x[(f_data&0x000000FF)]);
-	*/
-	uint32_t i, nb_cycles;
-	uint8_t val;
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
-
-	nb_cycles = get_cyclecounter();
-	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
-	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
-
-	g_sbuf[i+11] = 'U';
-	g_sbuf[i+12] = htoa[(data & 0xF0) >> 4];
-	g_sbuf[i+13] = htoa[(data & 0x0F)];
-	g_sbuf[i+14] = '\t';
-	g_sbuf_idx +=15;
-}
-
-__attribute__ ((always_inline)) static inline
-void sniff_write_eof_protocol(uint32_t timestamp_nb_cycles)
-{
-	uint32_t i, nb_cycles;
-	uint8_t val;
-	uint8_t data_buf[1];
-	uint8_t data;
-
-	data_buf[0] = RSSI_LEVELS;
-	Trf797xReadSingle(data_buf, 1);
-	data = data_buf[0];
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
-
-	nb_cycles = timestamp_nb_cycles;
-	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
-	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
-
-	g_sbuf[i+11] = 'R';
-	g_sbuf[i+12] = htoa[(data & 0xF0) >> 4];
-	g_sbuf[i+13] = htoa[(data & 0x0F)];
-	g_sbuf[i+14] = '\t';
-
-	g_sbuf_idx +=15;
-}
-
-__attribute__ ((always_inline)) static inline
-void sniff_write_8b_ASCII_HEX(uint8_t data, bool add_space)
-{
-	uint32_t i;
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = htoa[(data & 0xF0) >> 4];
-	g_sbuf[i+1] = htoa[(data & 0x0F)];
-	if (add_space == TRUE) {
-		g_sbuf[i+2] = ' ';
-		g_sbuf_idx +=3;
-	} else {
-		g_sbuf_idx +=2;
-	}
-}
-
-__attribute__ ((always_inline)) static inline
-void sniff_write_Parity_ASCII(uint8_t data)
-{
-	uint32_t i;
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = htoa[(data & 0x0F)];
-	g_sbuf[i+1] = ' ';
-	g_sbuf_idx +=2;
-}
-
 void hydranfc_sniff_14443A(t_hydra_console *con)
 {
 	(void)con;
@@ -584,6 +374,9 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 	/* Lock Kernel for sniffer */
 	chSysLock();
 
+	///qwerty
+    sniff_write_pcap_global_header();
+
 	/* Main Loop */
 	while (TRUE) {
 		lsh_bit = 0;
@@ -594,6 +387,17 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 			D4_OFF;
 			old_data_bit = 0;
 			f_data = 0;
+
+			///qwerty
+            uint32_t unkown = 0;
+            uint8_t pow = 0;
+            uint8_t data_buf[1];
+            uint32_t nb_cycles_start = 0;
+            uint32_t nb_cycles_end = 0;
+
+            ///qwerty
+            nb_cycles_start = get_cyclecounter();
+
 
 			u32_data = WaitGetDMABuffer();
 			old_data_bit = (uint32_t)(u32_data&1);
@@ -610,6 +414,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 			tmp_u8_data = 0;
 			tmp_u8_data_nb_bit = 0;
 
+
 			/* Search first edge bit position to synchronize stream */
 			/* Search an edge on each bit from MSB to LSB */
 			/* Old bit = 1 so new bit will be 0 => 11111111 10000000 => 00000000 01111111 just need to reverse it to count leading zero */
@@ -621,9 +426,8 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 			rsh_miller_bit = 0;
 			lsh_miller_bit = 32-rsh_miller_bit;
 
-			/* Shift data */
 			f_data = u32_data<<lsh_bit;
-			/* Next Data */
+
 			TST_OFF;
 			u32_data = WaitGetDMABuffer();
 			TST_ON;
@@ -651,13 +455,11 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 			case MILLER_MODIFIED_106KHZ:
 				/* Miller Modified@~106Khz Start bit */
 				old_protocol_found = MILLER_MODIFIED_106KHZ;
-				sniff_write_pcd();
 				break;
 
 			case MANCHESTER_106KHZ:
 				/* Manchester@~106Khz Start bit */
 				old_protocol_found = MANCHESTER_106KHZ;
-				sniff_write_picc();
 				break;
 
 			default:
@@ -672,7 +474,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 					// New Word
 					rsh_miller_bit = 15; /* Between 2 to 3.1us => 7 to 11bits => Average 9bits + 6bits(margin) =< 32-15 = 17 bit */
 					lsh_miller_bit = 32-rsh_miller_bit;
-					sniff_write_pcd();
+
 					/* Start Bit not included in data buffer */
 				} else {
 					old_protocol_found = MILLER_MODIFIED_106KHZ;
@@ -682,7 +484,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 					// New Word
 					rsh_miller_bit = 15; /* Between 2 to 3.1us => 7 to 11bits => Average 9bits + 6bits(margin) =< 32-15 = 17 bit */
 					lsh_miller_bit = 32-rsh_miller_bit;
-					sniff_write_unknown_protocol(ds_data);
+
 				}
 				break;
 			}
@@ -691,6 +493,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 			old_u32_data = f_data;
 			old_data_counter = 0;
 			nb_data = 0;
+
 			while (1) {
 				if ( (K4_BUTTON) || (USER_BUTTON) ) {
 					break;
@@ -716,6 +519,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 					if ( (u32_data==0xFFFFFFFF) || (u32_data==0x00000000) ) {
 						old_data_counter++;
 						if (old_data_counter>1) {
+
 							/* No new data => End Of Frame detected => Wait new data & synchro */
 							break;
 						}
@@ -733,39 +537,46 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 					   (downsample_4x[(f_data&0x000000FF)]);
 
 				switch(protocol_found) {
-				case MILLER_MODIFIED_106KHZ:
+				case MILLER_MODIFIED_106KHZ:								/*protocol choice 2*/
 					if (tmp_u8_data_nb_bit < 8) {
-						tmp_u8_data |= (miller_modified_106kb[ds_data])<<tmp_u8_data_nb_bit;
+						tmp_u8_data |= (miller_modified_106kb[ds_data])<<tmp_u8_data_nb_bit;			/*pcd ds_data*/
 						tmp_u8_data_nb_bit++;
 					} else {
 						nb_data++;
 						tmp_u8_data_nb_bit=0;
-						/* Convert Hex to ASCII + Space */
-						sniff_write_8b_ASCII_HEX(tmp_u8_data, TRUE);
 
-						tmp_u8_data=0; /* Parity bit discarded */
+
+                        ///qwerty
+                        sniff_write_pcap_data(tmp_u8_data);
+
+                        //sniff_write_Parity_ASCII(miller_modified_106kb[ds_data]); /*odd parity bits recorded*/
+						tmp_u8_data=0;
 					}
 					break;
 
-				case MANCHESTER_106KHZ:
+				case MANCHESTER_106KHZ:									/*if Manchester 106*/
 					if (tmp_u8_data_nb_bit < 8) {
-						tmp_u8_data |= (manchester_106kb[ds_data])<<tmp_u8_data_nb_bit;
+						tmp_u8_data |= (manchester_106kb[ds_data])<<tmp_u8_data_nb_bit;		/*picc ds_data*/
 						tmp_u8_data_nb_bit++;
 					} else {
 						nb_data++;
 						tmp_u8_data_nb_bit=0;
-						/* Convert Hex to ASCII + Space */
-						sniff_write_8b_ASCII_HEX(tmp_u8_data, TRUE);
 
-						tmp_u8_data=0; /* Parity bit discarded */
+                        ///qwerty
+                        sniff_write_pcap_data(tmp_u8_data);
+
+                        //sniff_write_Parity_ASCII(manchester_106kb[ds_data]); /*odd parity bits*/
+						tmp_u8_data=0; /*odd parity bits discarded*/
 					}
 					break;
 
 				default:
 					/* Unknown protocol */
-					/* Convert Hex to ASCII */
-					sniff_write_8b_ASCII_HEX(ds_data, FALSE);
-					break;
+                    /* Convert Hex to ASCII */
+                    unkown = 1;
+
+                    ///qwerty
+                    sniff_write_pcap_data(tmp_u8_data);
 				}
 				/* For safety to avoid potential buffer overflow ... */
 				if (g_sbuf_idx >= NB_SBUFFER) {
@@ -774,16 +585,26 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 			}
 
 			/* End of Frame detected check if incomplete byte (at least 4bit) is present to write it as output */
+
 			if (tmp_u8_data_nb_bit>3) {
-				/* Convert Hex to ASCII + Space */
-				sniff_write_8b_ASCII_HEX(tmp_u8_data, FALSE);
+
+                ///qwerty
+                sniff_write_pcap_data(tmp_u8_data);
 			}
+
+            nb_cycles_end = get_cyclecounter();
+
+            data_buf[0] = RSSI_LEVELS;
+            Trf797xReadSingle(data_buf, 1);
+            pow = data_buf[0];
+
 
 #if 0
 			/* Send data if data are available (at least 4bytes) */
 			if ( g_sbuf_idx >= 4 ) {
 
 				chSysUnlock();
+
 				tprint_str( "%s\r\n", &g_sbuf[0]);
 				/* Wait chprintf() end */
 				chThdSleepMilliseconds(5);
@@ -800,266 +621,30 @@ void hydranfc_sniff_14443A(t_hydra_console *con)
 			if (g_sbuf_idx >= NB_SBUFFER) {
 				g_sbuf_idx = NB_SBUFFER;
 			}
+
+			///qwerty
+			sniff_write_pcap_packet_header(nb_cycles_start);
+
+			if (unkown == 1)
+                sniff_write_data_header (pow, 3, 1, nb_cycles_end, 0);
+            else
+                sniff_write_data_header (pow, protocol_found, 1, nb_cycles_end, 0);
+
+            uint32_t y = 0;
+
+            do {
+                uint32_t i;
+                i = g_sbuf_idx;
+
+                g_sbuf[i+0]=tmp_sbuf[y];
+                g_sbuf_idx +=1;
+                y++;
+            } while (y < tmp_sniffer_get_size() );
+
+            tmp_sbuf_idx = 0;
+
 			TST_OFF;
 		}
+
 	} // Main While Loop
 }
-
-/* Special version with:
- - Parity information for each byte (if total nb bits per frame > 8)
- - End Of Frame TimeStamp
-*/
-void hydranfc_sniff_14443A_dbg(t_hydra_console *con)
-{
-	(void)con;
-
-	uint8_t  ds_data, tmp_u8_data, tmp_u8_data_nb_bit;
-	uint32_t f_data, lsh_bit, rsh_bit;
-	uint32_t rsh_miller_bit, lsh_miller_bit;
-	uint32_t protocol_found, old_protocol_found; /* 0=Unknown, 1=106kb Miller Modified, 2=106kb Manchester */
-	uint32_t old_data_counter;
-	uint32_t nb_data;
-	uint32_t timestamp_nb_cycles;
-
-	tprintf("cmd_nfc_sniff_14443A start TRF7970A configuration as sniffer mode\r\n");
-	tprintf("Abort/Exit by pressing K4 button\r\n");
-	init_sniff_nfc();
-
-	tprintf("Starting Sniffer ISO14443-A 106kbps ...\r\n");
-	/* Wait a bit in order to display all text */
-	chThdSleepMilliseconds(50);
-
-	old_protocol_found = 0;
-	protocol_found = 0;
-	g_sbuf_idx = 0;
-
-	/* Lock Kernel for sniffer */
-	chSysLock();
-
-	/* Main Loop */
-	while (TRUE) {
-		lsh_bit = 0;
-		rsh_bit = 0;
-		irq_no = 0;
-
-		while (TRUE) {
-			D4_OFF;
-			old_data_bit = 0;
-			f_data = 0;
-
-			u32_data = WaitGetDMABuffer();
-			old_data_bit = (uint32_t)(u32_data&1);
-			old_u32_data = u32_data;
-
-			/* Wait until data change or K4 is pressed to stop/exit */
-			if (sniff_wait_data_change_or_exit() == TRUE) {
-				return;
-			}
-
-			/* Log All Data */
-			TST_ON;
-			D4_ON;
-			tmp_u8_data = 0;
-			tmp_u8_data_nb_bit = 0;
-
-			/* Search first edge bit position to synchronize stream */
-			/* Search an edge on each bit from MSB to LSB */
-			/* Old bit = 1 so new bit will be 0 => 11111111 10000000 => 00000000 01111111 just need to reverse it to count leading zero */
-			/* Old bit = 0 so new bit will be 1 => 00000000 01111111 no need to reverse to count leading zero */
-			lsh_bit = old_data_bit ? (~u32_data) : u32_data;
-			lsh_bit = CountLeadingZero(lsh_bit);
-			rsh_bit = 32-lsh_bit;
-
-			rsh_miller_bit = 0;
-			lsh_miller_bit = 32-rsh_miller_bit;
-
-			/* Shift data */
-			f_data = u32_data<<lsh_bit;
-			/* Next Data */
-			TST_OFF;
-			u32_data = WaitGetDMABuffer();
-			TST_ON;
-			f_data |= u32_data>>rsh_bit;
-
-			/* Todo: Better algorithm to recognize frequency using table and counting number of edge ...
-			              and finaly use majority voting for frequency */
-			// DownSampling by 4 (input 32bits output 8bits filtered)
-			// In Freq of 3.39MHz => 105.9375KHz on 8bits (each bit is 848KHz so 2bits=423.75KHz)
-			ds_data  = ((downsample_4x[(f_data>>24)])<<6) |
-				   ((downsample_4x[((f_data&0x00FF0000)>>16)])<<4) |
-				   ((downsample_4x[((f_data&0x0000FF00)>>8)])<<2) |
-				   (downsample_4x[(f_data&0x000000FF)]);
-
-			/* Todo: Find frequency by counting number of consecutive "1" & "0" or the reverse.
-			 * Example0: 1x"1" then 1x"0" => 3.39MHz/2 = Freq 1695KHz
-			 * Example1: 2x"1" then 2x"0" => 3.39MHz/4 = Freq 847.5KHz
-			 * Example2: 4x"1" then 4x"0" => 3.39MHz/8 = Freq 423.75KHz
-			 * Example3: 8x"1" then 8x"0" (8+8) => 3.39MHz/16 = Freq 211.875KHz
-			 * Example4: 16x"1" then 16x"0" (16+16) => 3.39MHz/32 = Freq 105.9375KHz
-			 * Example Miller Modified '0' @~106Khz: 00000000 00111111 11111111 11111111 => 10x"0" then 22x"1" (10+22=32) => 3.39MHz/32 = Freq 105.9375KHz
-			 **/
-			protocol_found = detected_protocol[ds_data];
-			switch(protocol_found) {
-			case MILLER_MODIFIED_106KHZ:
-				/* Miller Modified@~106Khz Start bit */
-				old_protocol_found = MILLER_MODIFIED_106KHZ;
-				sniff_write_pcd();
-				break;
-
-			case MANCHESTER_106KHZ:
-				/* Manchester@~106Khz Start bit */
-				old_protocol_found = MANCHESTER_106KHZ;
-				sniff_write_picc();
-				break;
-
-			default:
-				/* If previous protocol was Manchester now it should be Miller Modified
-				  (it is a supposition and because Miller modified start after manchester)
-				*/
-				if ( MANCHESTER_106KHZ == old_protocol_found ) {
-					old_protocol_found = MILLER_MODIFIED_106KHZ;
-					protocol_found = MILLER_MODIFIED_106KHZ;
-					/* RE Synchronize bit stream to start of bit from (00000000) 11111111 to 00111111 (2 to 3 us at level 0 are not seen) */
-					/* Nota only first Miller Modified Word does not need this hack because it is well detected it start with (11111111) 00111111  */
-					// New Word
-					rsh_miller_bit = 15; /* Between 2 to 3.1us => 7 to 11bits => Average 9bits + 6bits(margin) =< 32-15 = 17 bit */
-					lsh_miller_bit = 32-rsh_miller_bit;
-					sniff_write_pcd();
-					/* Start Bit not included in data buffer */
-				} else {
-					old_protocol_found = MILLER_MODIFIED_106KHZ;
-					protocol_found = MILLER_MODIFIED_106KHZ;
-					/* RE Synchronize bit stream to start of bit from (00000000) 11111111 to 00111111 (2 to 3 us at level 0 are not seen) */
-					/* Nota only first Miller Modified Word does not need this hack because it is well detected it start with (11111111) 00111111  */
-					// New Word
-					rsh_miller_bit = 15; /* Between 2 to 3.1us => 7 to 11bits => Average 9bits + 6bits(margin) =< 32-15 = 17 bit */
-					lsh_miller_bit = 32-rsh_miller_bit;
-					sniff_write_unknown_protocol(ds_data);
-				}
-				break;
-			}
-
-			/* Decode Data until end of frame detected */
-			old_u32_data = f_data;
-			old_data_counter = 0;
-			nb_data = 0;
-			while (1) {
-				if ( (K4_BUTTON) || (USER_BUTTON) ) {
-					break;
-				}
-
-				/* New Word */
-				f_data = u32_data<<lsh_bit;
-
-				/* Next Data */
-				TST_OFF;
-				u32_data = WaitGetDMABuffer();
-				TST_ON;
-
-				f_data |= u32_data>>rsh_bit;
-
-				/* In New Data 32bits */
-				if (u32_data != old_u32_data) {
-					old_u32_data = u32_data;
-					old_data_counter = 0;
-				} else {
-					old_u32_data = u32_data;
-					/* No new data */
-					if ( (u32_data==0xFFFFFFFF) || (u32_data==0x00000000) ) {
-						old_data_counter++;
-						if (old_data_counter>1) {
-							/* No new data => End Of Frame detected => Wait new data & synchro */
-							break;
-						}
-					} else {
-						old_data_counter = 0;
-					}
-				}
-
-				f_data = (f_data>>rsh_miller_bit)|(0xFFFFFFFF<<lsh_miller_bit);
-				// DownSampling by 4 (input 32bits output 8bits filtered)
-				// In Freq of 3.39MHz => 105.9375KHz on 8bits (each bit is 848KHz so 2bits=423.75KHz)
-				ds_data  = ((downsample_4x[(f_data>>24)])<<6) |
-					   ((downsample_4x[((f_data&0x00FF0000)>>16)])<<4) |
-					   ((downsample_4x[((f_data&0x0000FF00)>>8)])<<2) |
-					   (downsample_4x[(f_data&0x000000FF)]);
-
-				switch(protocol_found) {
-				case MILLER_MODIFIED_106KHZ:
-					if (tmp_u8_data_nb_bit < 8) {
-						tmp_u8_data |= (miller_modified_106kb[ds_data])<<tmp_u8_data_nb_bit;
-						tmp_u8_data_nb_bit++;
-					} else {
-						nb_data++;
-						tmp_u8_data_nb_bit=0;
-						/* Convert Hex to ASCII + Space */
-						sniff_write_8b_ASCII_HEX(tmp_u8_data, TRUE);
-						/* Write Parity + Space */
-						sniff_write_Parity_ASCII(miller_modified_106kb[ds_data]);
-
-						tmp_u8_data=0;
-					}
-					break;
-
-				case MANCHESTER_106KHZ:
-					if (tmp_u8_data_nb_bit < 8) {
-						tmp_u8_data |= (manchester_106kb[ds_data])<<tmp_u8_data_nb_bit;
-						tmp_u8_data_nb_bit++;
-					} else {
-						nb_data++;
-						tmp_u8_data_nb_bit=0;
-						/* Convert Hex to ASCII + Space */
-						sniff_write_8b_ASCII_HEX(tmp_u8_data, TRUE);
-						/* Write Parity + Space */
-						sniff_write_Parity_ASCII(manchester_106kb[ds_data]);
-
-						tmp_u8_data=0;
-					}
-					break;
-
-				default:
-					/* Unknown protocol */
-					/* Convert Hex to ASCII */
-					sniff_write_8b_ASCII_HEX(ds_data, FALSE);
-					break;
-				}
-				/* For safety to avoid potential buffer overflow ... */
-				if (g_sbuf_idx >= NB_SBUFFER) {
-					g_sbuf_idx = NB_SBUFFER;
-				}
-			}
-
-			/* End of Frame detected check if incomplete byte (at least 4bit) is present to write it as output */
-			timestamp_nb_cycles = get_cyclecounter();
-			if (tmp_u8_data_nb_bit>3) {
-				/* Convert Hex to ASCII + Space */
-				sniff_write_8b_ASCII_HEX(tmp_u8_data, FALSE);
-			}
-			sniff_write_eof_protocol(timestamp_nb_cycles);
-
-#if 0
-			/* Send data if data are available (at least 4bytes) */
-			if ( g_sbuf_idx >= 4 ) {
-
-				chSysUnlock();
-				tprint_str( "%s\r\n", &g_sbuf[0]);
-				/* Wait chprintf() end */
-				chThdSleepMilliseconds(5);
-				chSysLock();
-
-				/* Swap Current Buffer*/
-				/*
-				      // Clear Index
-				      g_sbuf_idx = 0;
-				*/
-			}
-#endif
-			/* For safety to avoid buffer overflow ... */
-			if (g_sbuf_idx >= NB_SBUFFER) {
-				g_sbuf_idx = NB_SBUFFER;
-			}
-			TST_OFF;
-		}
-	} // Main While Loop
-}
-

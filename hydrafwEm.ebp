@@ -674,6 +674,11 @@
 		</Unit>
 		<Unit filename="hydrafw_STM32F405xG.ld" />
 		<Unit filename="hydrafw_rules.ld" />
+		<Unit filename="hydranfc\file_fmt.h" />
+		<Unit filename="hydranfc\file_fmt_pcap.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="hydranfc\file_fmt_pcap.h" />
 		<Unit filename="hydranfc\hydranfc.c">
 			<Option compilerVar="CC" />
 		</Unit>

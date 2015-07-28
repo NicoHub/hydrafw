@@ -93,5 +93,5 @@ typedef struct mode_exec_t {
 
 void print_freq(t_hydra_console *con, uint32_t freq);
 
-#endif /* _HYDRABUS_MODE_H_ */
+#endif
 
